@@ -5,7 +5,6 @@
 I recently discovered a fascinating behavior in how `CompletableFuture.orTimeout()` works that's worth exploring. The scenario is straightforward—three concurrent tasks with a 5-second timeout and 10-second execution time. All three should timeout and return negative values. But interestingly, one of them returned a positive value instead.
 
 This discovery led me to investigate the underlying mechanics and revealed an important lesson: **the way you chain operations after `orTimeout()` can significantly affect the behavior of your concurrent code**. The key insight? Understanding how the single-threaded scheduler and blocking operations interact.
----
 
 ## The Problem: A Mysterious Behavior
 
