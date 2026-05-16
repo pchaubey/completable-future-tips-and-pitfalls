@@ -217,54 +217,14 @@ Now **all tasks get proper timeout exceptions**, and Task-3 correctly returns -3
 
 The `CompletableFutureDelayScheduler` is a global resource. Blocking it affects **all timeout operations in your entire JVM**.
 
-❌ **Bad:**
-```java
-.handle((t, ex) -> {
-    return someAsyncTask().join();  // Blocks scheduler!
-})
-```
-
-✅ **Good:**
-```java
-.handleAsync((t, ex) -> {
-    return someAsyncTask().join();  // Blocks your executor, not scheduler
-}, myExecutor)
-```
-
 ### 2. Use Async Variants for Blocking Operations
 
 CompletableFuture provides both sync and async variants:
-
-| Operation | Sync | Async |
-|-----------|------|-------|
-| Transform | `map()` / `thenApply()` | `thenApplyAsync()` |
-| Consume | `handle()` | `handleAsync()` |
-| Compose | `thenCompose()` | `thenComposeAsync()` |
-
 When chaining after `orTimeout()`, **always use the async variant** if your operation might block.
 
 ### 3. Separate Concerns with Executors
 
 Use different executors for different responsibilities:
-
-```java
-// Scheduler for timeouts (system-managed, don't block!)
-// Already handled by orTimeout()
-
-// Your executor for business logic (safe to block)
-ExecutorService businessExecutor = Executors.newCachedThreadPool();
-
-future
-    .orTimeout(5, TimeUnit.SECONDS)
-    .handleAsync((t, ex) -> {
-        if (ex != null) {
-            return handleTimeoutAsync(ex);  // Business logic
-        }
-        return t;
-    }, businessExecutor);  // ← Your executor, not the scheduler
-```
-
----
 
 ## Real-World Implications
 
@@ -272,14 +232,7 @@ This issue can manifest in subtle ways in production:
 
 ### Scenario 1: Multiple Timeout Chains
 
-If you have multiple `orTimeout()` operations in your application, and each one blocks the scheduler, you create a cascade of delays:
-
-```
-Task A timeout: blocks 3 seconds
-Task B timeout: waits, then blocks 3 seconds
-Task C timeout: waits, then blocks 3 seconds
-Task D timeout: has to wait 9+ seconds just to execute!
-```
+If you have multiple `orTimeout()` operations in your application, and each one blocks the scheduler, you create a cascade of delays.
 
 ### Scenario 2: Distributed Timeout Cascades
 
@@ -288,60 +241,6 @@ In microservices, if each service uses `orTimeout()` with blocking handlers, tim
 ### Scenario 3: Thread Pool Exhaustion
 
 Even with a large thread pool, blocking operations after `orTimeout()` can cause unexpected behavior that's hard to debug.
-
----
-
-## Best Practices
-
-### Rule 1: Never Block the DelayScheduler
-
-```java
-// ❌ WRONG
-future.orTimeout(5, SECONDS)
-    .handle((t, ex) -> {
-        return blockingOperation();  // Blocks scheduler!
-    })
-
-// ✅ CORRECT
-future.orTimeout(5, SECONDS)
-    .handleAsync((t, ex) -> {
-        return blockingOperation();  // Blocks your executor
-    }, myExecutor)
-```
-
-### Rule 2: Use the Right Executor
-
-```java
-ExecutorService timeoutHandler = Executors.newCachedThreadPool(r -> {
-    Thread t = new Thread(r);
-    t.setName("timeout-handler-" + t.getId());
-    return t;
-});
-
-future.orTimeout(timeout, unit)
-    .handleAsync((result, ex) -> {
-        // Your blocking operation here
-        return handle(result, ex);
-    }, timeoutHandler);
-```
-
-### Rule 3: Understand the Completion Order
-
-```java
-// Remember: First completion wins!
-var future = asyncTask()
-    .orTimeout(5, SECONDS);
-
-// If async task completes before timeout:
-// → Result is the async task's value
-// → Timeout exception is ignored
-
-// If timeout occurs before async task:
-// → Result is TimeoutException
-// → When async task later completes, it's ignored
-```
-
----
 
 ## Conclusion
 
@@ -354,12 +253,10 @@ By chaining a blocking operation directly after `orTimeout()` using `handle()`, 
 ### Key Takeaways:
 
 1. **`orTimeout()` uses a single-threaded scheduler** for all JVM timeouts
-2. **Blocking the scheduler delays all other timeouts** in the system
-3. **Use `handleAsync()` with a separate executor** for blocking operations after `orTimeout()`
+2. **Blocking the scheduler delays all other timeouts** in the system 
+3. **Use `handleAsync()` for blocking operations after orTimeout(). Depending on your Thread pooling strategy you may want to use a separate executor
 4. **"First completion wins"** in CompletableFuture—remember the timing
 5. **Test timeout behavior carefully**—it's more complex than it appears
-
-The next time you use `orTimeout()`, remember this lesson. A small change from `handle()` to `handleAsync()` can prevent hours of debugging in production.
 
 ---
 
